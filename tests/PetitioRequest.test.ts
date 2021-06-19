@@ -132,13 +132,12 @@ describe("Request Body", () => {
 	});
 
 	test("GIVEN passed buffer body THEN set body / headers", () => {
-		expect.assertions(3);
+		expect.assertions(2);
 
 		const req = new PetitioRequest(url()).body(bodyBuffer);
 
 		expect(req.data).toEqual(bodyBuffer);
 		expect(req.reqHeaders["content-type"]).toBeUndefined();
-		expect(req.reqHeaders["content-length"]).toEqual(Buffer.byteLength(bodyBuffer).toString());
 	});
 });
 

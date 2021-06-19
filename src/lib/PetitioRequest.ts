@@ -18,6 +18,9 @@ import { stringify } from "querystring"; // eslint-disable-line no-duplicate-imp
  * Accepted HTTP methods (currently only supports up to HTTP/1.1).
  */
 export type HTTPMethod = "GET" | "HEAD" | "POST" | "OPTIONS" | "PUT" | "DELETE" | "TRACE" | "CONNECT" | "PATCH";
+
+const validProtocols = ["http:", "https:"];
+
 /**
  * @see [Undici ClientOptions timeout documentation](https://github.com/nodejs/undici/blob/main/docs/api/Client.md#parameter-clientoptions)
  */
@@ -51,7 +54,7 @@ export class PetitioRequest {
 	 * Whether [[PetitioRequest.kClient]] will persist between [[PetitioRequest.send]]
 	 * calls. It is recommended to enable this for superior performance.
 	 */
-	public keepClient?: boolean;
+	public keepClient = false;
 	/**
 	 * The headers to attach to the request.
 	 */
@@ -69,7 +72,7 @@ export class PetitioRequest {
 	 * The AbortController attached to the request
 	 * enableable with [[PetitioRequest.signal]]
 	 */
-	public controller?: AbortController;
+	public controller?: AbortController | globalThis.AbortController;
 
 	/**
 	 * @param {(string | URL)} url The URL to start composing a request for.
@@ -79,7 +82,8 @@ export class PetitioRequest {
 	public constructor(url: string | URL, httpMethod: HTTPMethod = "GET") {
 		this.url = typeof url === "string" ? new URL(url) : url;
 		this.httpMethod = httpMethod;
-		if (!["http:", "https:"].includes(this.url.protocol)) throw new Error(`Bad URL protocol: ${this.url.protocol}`);
+		// eslint-disable-next-line max-len, @typescript-eslint/no-unnecessary-boolean-literal-compare
+		if (validProtocols.includes(this.url.protocol) === false) throw new Error(`Bad URL protocol: ${this.url.protocol}`);
 	}
 
 	/**
@@ -113,9 +117,11 @@ export class PetitioRequest {
 	public query(key: string | Record<string, any>, value?: any): this {
 		if (typeof key === "object") {
 			const keys = Object.keys(key);
-			// eslint-disable-next-line @typescript-eslint/prefer-for-of, no-plusplus
-			for (let ii = 0; ii < keys.length; ++ii) {
-				const val = keys[ii];
+			// eslint-disable-next-line vars-on-top, no-var
+			var len = keys.length;
+			// eslint-disable-next-line no-plusplus
+			while (len--) {
+				const val = keys[len];
 				this.url.searchParams.append(val, key[val]);
 			}
 		} else this.url.searchParams.append(key, value);
@@ -135,7 +141,7 @@ export class PetitioRequest {
 		return this;
 	}
 	/**
-	 * @param {AbortController} controller A controller instance that handles aborting the request.
+	 * @param {(AbortController | globalThis.AbortController)} controller A controller instance that handles aborting the request.
 	 * @return {*} The request object for further composition.
 	 * @example
 	 * ```ts
@@ -144,7 +150,7 @@ export class PetitioRequest {
 	 * setTimeout(() => controller.abort(), 5000) // serves as a request timeout
 	 * ```
 	 */
-	public signal(controller: AbortController): this {
+	public signal(controller: AbortController | globalThis.AbortController): this {
 		this.controller = controller;
 
 		return this;
@@ -200,16 +206,14 @@ export class PetitioRequest {
 				break;
 			}
 			default: {
-				if (typeof data === "object" && !Buffer.isBuffer(data)) {
+				// eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
+				if (typeof data === "object" && (Buffer.isBuffer(data) === false)) {
 					this.data = JSON.stringify(data);
 					this.header({
 						"content-type": "application/json",
 						"content-length": Buffer.byteLength(this.data as string).toString()
 					});
-				} else {
-					this.data = data;
-					this.header("content-length", Buffer.byteLength(this.data as string | Buffer).toString());
-				}
+				} else this.data = data;
 				break;
 			}
 		}
@@ -229,10 +233,11 @@ export class PetitioRequest {
 		// eslint-disable-next-line max-len
 		if (typeof header === "object") {
 			const keys = Object.keys(header);
-
-			// eslint-disable-next-line @typescript-eslint/prefer-for-of, no-plusplus
-			for (let ii = 0; ii < keys.length; ++ii) {
-				const val = keys[ii];
+			// eslint-disable-next-line vars-on-top, no-var
+			var len = keys.length;
+			// eslint-disable-next-line no-plusplus
+			while (len--) {
+				const val = keys[len];
 				this.reqHeaders[val.toLowerCase()] = header[val];
 			}
 		} else this.reqHeaders[header.toLowerCase()] = value;
@@ -343,12 +348,11 @@ export class PetitioRequest {
 			const data: Uint8Array[] | Buffer[] = [];
 
 			client.dispatch(options, {
-				onData: (buff: Buffer) => {
-					return data.push(buff);
-				},
+				onData: (buff: Buffer) => (data[data.length] = (buff)),
 				onError: (err: Error) => reject(err),
 				onComplete: () => {
-					if (!this.keepClient) client.close();
+					// eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
+					if (this.keepClient === false) client.close();
 					res._addBody(data);
 					resolve(res);
 				},

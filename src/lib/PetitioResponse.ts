@@ -41,11 +41,15 @@ export class PetitioResponse {
 	 * @return {*} In place operation with no return.
 	 */
 	public _parseHeaders(headers: string[]) {
-		for (let idx = 1; idx < headers.length; idx += 2) {
+		const len = headers.length;
+		// eslint-disable-next-line vars-on-top, no-var
+		for (var idx = 1; idx < len; idx += 2) {
 			const key = headers[idx - 1].toLowerCase();
-			let val = this.headers[key];
+			// eslint-disable-next-line vars-on-top, no-var
+			var val = this.headers[key];
 			if (val) {
-				if (!Array.isArray(val)) {
+				// eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
+				if (Array.isArray(val) === false) {
 					val = [val];
 					this.headers[key] = val;
 				}
@@ -69,5 +73,12 @@ export class PetitioResponse {
 	 */
 	public text(encoding: BufferEncoding = "utf8"): string {
 		return this.body.toString(encoding);
+	}
+
+	/**
+ 	 * @return {*} The raw response body as a buffer.
+ 	 */
+	public raw(): Buffer {
+		return this.body;
 	}
 }
