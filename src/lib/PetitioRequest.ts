@@ -1,12 +1,14 @@
 /**
  * @module PetitioRequest
  */
-
+// eslint-disable-next-line node/no-missing-import, no-duplicate-imports
+import type { DispatchOptions as ADO, Options as AO } from "undici/types/agent";
+import { Agent, Client } from "undici";
 import type AbortController from "node-abort-controller";
-// @ts-expect-error 7016 - Unusual type exports
-import Client from "undici/lib/core/client";
-// eslint-disable-next-line node/no-missing-import
-import type ClientType from "undici/types/client";
+// eslint-disable-next-line node/no-missing-import, no-duplicate-imports
+import type { Options as CO } from "undici/types/client";
+// eslint-disable-next-line node/no-missing-import, no-duplicate-imports
+import type { DispatchOptions as DO } from "undici/types/dispatcher";
 import type { IncomingHttpHeaders } from "http";
 import type { ParsedUrlQueryInput } from "querystring";
 import { PetitioResponse } from "./PetitioResponse";
@@ -14,25 +16,35 @@ import type { Readable } from "stream";
 import { URL } from "url";
 import { join } from "path";
 import { stringify } from "querystring"; // eslint-disable-line no-duplicate-imports
+
+export type DispatchOptions = DO | ADO;
+
+export type Options = AO | CO;
+
 /**
  * Accepted HTTP methods (currently only supports up to HTTP/1.1).
  */
 export type HTTPMethod = "GET" | "HEAD" | "POST" | "OPTIONS" | "PUT" | "DELETE" | "TRACE" | "CONNECT" | "PATCH";
+
+const validProtocols = ["http:", "https:"];
+
 /**
- * @see [Undici ClientOptions timeout documentation](https://github.com/nodejs/undici/blob/main/docs/api/Client.md#parameter-clientoptions)
+ * @see [Undici AgentOptions timeout documentation](https://github.com/nodejs/undici/blob/main/docs/api/Agent.md#parameter-agentoptions)
  */
 export interface TimeoutOptions {
 	bodyTimeout?: number;
 	headersTimeout?: number;
 	keepAliveTimeout?: number
+	keepAliveMaxTimeout?: number;
+	keepAliveTimeoutThreshold?: number;
 }
 
 export class PetitioRequest {
 	/**
 	 * Options to use for Undici under the hood.
-	 * @see [Undici ClientOptions documentation](https://github.com/nodejs/undici/blob/main/docs/api/Client.md#parameter-clientoptions)
+	 * @see [Undici AgentOptions documentation](https://github.com/nodejs/undici/blob/main/docs/api/Agent.md#parameter-agentoptions)
 	 */
-	public coreOptions: ClientType.Options = {};
+	public coreOptions: Options = {};
 	/**
 	 * The data to be sent as the request body.
 	 * This will be a buffer or string for normal requests, or a stream.Readable
@@ -44,20 +56,20 @@ export class PetitioRequest {
 	 */
 	public httpMethod: HTTPMethod = "GET";
 	/**
-	 * @see [[PetitioRequest.client]]
+	 * @see [[PetitioRequest.dispatch]]
 	 */
-	public kClient?: ClientType;
+	public kDispatch?: Agent | Client;
 	/**
-	 * Whether [[PetitioRequest.kClient]] will persist between [[PetitioRequest.send]]
+	 * Whether [[PetitioRequest.kDispatch]] will persist between [[PetitioRequest.send]]
 	 * calls. It is recommended to enable this for superior performance.
 	 */
-	public keepClient?: boolean;
+	public keepDispatcher = false;
 	/**
 	 * The headers to attach to the request.
 	 */
 	public reqHeaders: IncomingHttpHeaders = {};
 	/**
-	 * The timeout options for the Undici client.
+	 * The timeout options for the Undici agent.
 	 * @see [[TimeoutOptions]]
 	 */
 	public timeoutOptions: TimeoutOptions = {};
@@ -69,7 +81,7 @@ export class PetitioRequest {
 	 * The AbortController attached to the request
 	 * enableable with [[PetitioRequest.signal]]
 	 */
-	public controller?: AbortController;
+	public controller?: AbortController | globalThis.AbortController;
 
 	/**
 	 * @param {(string | URL)} url The URL to start composing a request for.
@@ -79,18 +91,20 @@ export class PetitioRequest {
 	public constructor(url: string | URL, httpMethod: HTTPMethod = "GET") {
 		this.url = typeof url === "string" ? new URL(url) : url;
 		this.httpMethod = httpMethod;
-		if (!["http:", "https:"].includes(this.url.protocol)) throw new Error(`Bad URL protocol: ${this.url.protocol}`);
+		// eslint-disable-next-line max-len, @typescript-eslint/no-unnecessary-boolean-literal-compare
+		if (validProtocols.includes(this.url.protocol) === false) throw new Error(`Bad URL protocol: ${this.url.protocol}`);
 	}
 
 	/**
-	 * @param {ClientType} client The Undici client instance you wish to use.
-	 * @param {boolean} keepAlive Whether to persist the client across requests or not.
-	 * @return {*} The request object for further composition.
+	 * @param {(Agent | Client)} dispatch The Undici agent or client instance you wish to use.
+	 * @param {boolean} keepAlive Whether to persist the dispatcher across requests or not.
+	 * @return {PetitioRequest} The request object for further composition.
+	 * @see [Undici Agent documentation](https://github.com/nodejs/undici/blob/main/docs/api/Agent.md)
 	 * @see [Undici Client documentation](https://github.com/nodejs/undici/blob/main/docs/api/Client.md)
 	 */
-	public client(client: ClientType, keepAlive?: boolean): this {
-		this.kClient = client;
-		if (keepAlive) this.keepClient = true;
+	public dispatch(agent: Agent | Client, keepAlive?: boolean): this {
+		this.kDispatch = agent;
+		if (keepAlive) this.keepDispatcher = true;
 
 		return this;
 	}
@@ -113,9 +127,11 @@ export class PetitioRequest {
 	public query(key: string | Record<string, any>, value?: any): this {
 		if (typeof key === "object") {
 			const keys = Object.keys(key);
-			// eslint-disable-next-line @typescript-eslint/prefer-for-of, no-plusplus
-			for (let ii = 0; ii < keys.length; ++ii) {
-				const val = keys[ii];
+			// eslint-disable-next-line vars-on-top, no-var
+			var len = keys.length;
+			// eslint-disable-next-line no-plusplus
+			while (len--) {
+				const val = keys[len];
 				this.url.searchParams.append(val, key[val]);
 			}
 		} else this.url.searchParams.append(key, value);
@@ -135,7 +151,7 @@ export class PetitioRequest {
 		return this;
 	}
 	/**
-	 * @param {AbortController} controller A controller instance that handles aborting the request.
+	 * @param {(AbortController | globalThis.AbortController)} controller A controller instance that handles aborting the request.
 	 * @return {*} The request object for further composition.
 	 * @example
 	 * ```ts
@@ -144,7 +160,7 @@ export class PetitioRequest {
 	 * setTimeout(() => controller.abort(), 5000) // serves as a request timeout
 	 * ```
 	 */
-	public signal(controller: AbortController): this {
+	public signal(controller: AbortController | globalThis.AbortController): this {
 		this.controller = controller;
 
 		return this;
@@ -200,16 +216,14 @@ export class PetitioRequest {
 				break;
 			}
 			default: {
-				if (typeof data === "object" && !Buffer.isBuffer(data)) {
+				// eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
+				if (typeof data === "object" && (Buffer.isBuffer(data) === false)) {
 					this.data = JSON.stringify(data);
 					this.header({
 						"content-type": "application/json",
 						"content-length": Buffer.byteLength(this.data as string).toString()
 					});
-				} else {
-					this.data = data;
-					this.header("content-length", Buffer.byteLength(this.data as string | Buffer).toString());
-				}
+				} else this.data = data;
 				break;
 			}
 		}
@@ -229,10 +243,11 @@ export class PetitioRequest {
 		// eslint-disable-next-line max-len
 		if (typeof header === "object") {
 			const keys = Object.keys(header);
-
-			// eslint-disable-next-line @typescript-eslint/prefer-for-of, no-plusplus
-			for (let ii = 0; ii < keys.length; ++ii) {
-				const val = keys[ii];
+			// eslint-disable-next-line vars-on-top, no-var
+			var len = keys.length;
+			// eslint-disable-next-line no-plusplus
+			while (len--) {
+				const val = keys[len];
 				this.reqHeaders[val.toLowerCase()] = header[val];
 			}
 		} else this.reqHeaders[header.toLowerCase()] = value;
@@ -271,17 +286,17 @@ export class PetitioRequest {
 
 	/**
 	 * @param {*} key An object of key-value options to set for Undici.
-	 * @see [Undici Client documentation](https://github.com/nodejs/undici/blob/main/docs/api/Client.md)
+	 * @see [Undici Agent documentation](https://github.com/nodejs/undici/blob/main/docs/api/Agent.md)
 	 */
-	public option(key: ClientType.Options): this
+	public option(key: Options): this
 	/**
 	 * @template T
-	 * @param {T} key The client options key to set.
-	 * @param {ClientType.Options[T]} value The value to set the client option to (type checked).
-	 * @see [Undici Client documentation](https://github.com/nodejs/undici/blob/main/docs/api/Client.md)
+	 * @param {T} key The agent options key to set.
+	 * @param {Options[T]} value The value to set the agent option to (type checked).
+	 * @see [Undici Agent documentation](https://github.com/nodejs/undici/blob/main/docs/api/Agent.md)
 	 */
-	public option<T extends keyof ClientType.Options>(key: T, value: ClientType.Options[T]): this
-	public option(key: keyof ClientType.Options | ClientType.Options, value?: any) {
+	public option<T extends keyof Options>(key: T, value: Options[T]): this
+	public option(key: keyof Options | Options, value?: any) {
 		if (typeof key === "object") Object.assign(this.coreOptions, key);
 		else this.coreOptions[key] = value;
 
@@ -329,34 +344,37 @@ export class PetitioRequest {
 	 */
 	public send(): Promise<PetitioResponse> {
 		return new Promise((resolve, reject) => {
-			const options: ClientType.RequestOptions = {
+			const options: DispatchOptions = {
+				origin: this.url.origin,
 				path: this.url.pathname + this.url.search,
 				method: this.httpMethod,
 				headers: this.reqHeaders,
-				body: this.data,
-				signal: this.controller
+				body: this.data
+				// eslint-disable-next-line no-warning-comments
+				// todo(doge): implement "idempotent" retry logic
 			};
 
-			const client = this.kClient ?? new Client(this.url.origin, this.coreOptions);
+			const dispatcher = this.kDispatch ?? new Client(this.url.origin, this.coreOptions);
 
 			const res: PetitioResponse = new PetitioResponse();
 			const data: Uint8Array[] | Buffer[] = [];
 
-			client.dispatch(options, {
-				onData: (buff: Buffer) => {
-					return data.push(buff);
-				},
+			dispatcher.dispatch(options, {
+				// @ts-ignore test
+				onData: (buff: Buffer) => (data[data.length] = (buff)),
 				onError: (err: Error) => reject(err),
 				onComplete: () => {
-					if (!this.keepClient) client.close();
+					// eslint-disable-next-line no-void, @typescript-eslint/no-unnecessary-boolean-literal-compare
+					if (this.keepDispatcher === false) void dispatcher.close();
 					res._addBody(data);
 					resolve(res);
 				},
 				onConnect: () => null,
-				onHeaders: (statusCode: number, headers: string[], resume: () => void) => {
+				// @ts-ignore undici types are incorrect
+				onHeaders: (statusCode: number, headers: Buffer[], resume: () => void) => {
+					resume();
 					res.statusCode = statusCode;
 					res._parseHeaders(headers);
-					resume();
 				}
 			});
 		});
