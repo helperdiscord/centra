@@ -1,7 +1,6 @@
 /**
  * @module PetitioResponse
  */
-
 export class PetitioResponse {
 	/**
 	 * The response body received from the server.
@@ -29,8 +28,8 @@ export class PetitioResponse {
 	 * @return {*} In place operation with no return.
 	 */
 	public _addBody(chunks: Buffer[] | Uint8Array[]) {
-		const length = this.headers["content-length"];
-		this.body = Buffer.concat(chunks, length ? Number(length) : undefined);
+		const length = Number(this.headers["content-length"]) || undefined;
+		this.body = Buffer.concat(chunks, length);
 	}
 
 	/**
@@ -40,21 +39,16 @@ export class PetitioResponse {
 	 * as an array if it already exists.
 	 * @return {*} In place operation with no return.
 	 */
-	public _parseHeaders(headers: string[]) {
+	public _parseHeaders(headers: Buffer[]) {
 		const len = headers.length;
 		// eslint-disable-next-line vars-on-top, no-var
 		for (var idx = 1; idx < len; idx += 2) {
-			const key = headers[idx - 1].toLowerCase();
-			// eslint-disable-next-line vars-on-top, no-var
-			var val = this.headers[key];
-			if (val) {
-				// eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare
-				if (Array.isArray(val) === false) {
-					val = [val];
-					this.headers[key] = val;
-				}
-				val.push(headers[idx]);
-			} else this.headers[key] = headers[idx];
+			const key = headers[idx - 1].toString().toLowerCase();
+			const toA = headers[idx].toString();
+			const val = this.headers[key];
+			// eslint-disable-next-line @typescript-eslint/no-unnecessary-boolean-literal-compare, max-len, no-unused-expressions, max-statements-per-line
+			if (val !== undefined) if (Array.isArray(val) === false) (this.headers[key] = [val, toA]); else (val[val.length] = toA);
+			else this.headers[key] = toA;
 		}
 	}
 
@@ -76,8 +70,8 @@ export class PetitioResponse {
 	}
 
 	/**
- 	 * @return {*} The raw response body as a buffer.
- 	 */
+	   * @return {*} The raw response body as a buffer.
+	   */
 	public raw(): Buffer {
 		return this.body;
 	}
